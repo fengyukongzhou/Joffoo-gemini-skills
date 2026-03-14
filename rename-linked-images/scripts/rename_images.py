@@ -184,21 +184,56 @@ def main():
         ctime = datetime.datetime.fromtimestamp(stat.st_ctime)
         date_str = format_date(ctime, args.date_format)
     
+    # Collect all files that will be renamed and their target directory
+    files_to_rename = []
+    target_dirs = set()
+    
+    for old_name in image_links:
+        file_path = find_file_in_vault(old_name, md_path.parent, vault_root)
+        if file_path:
+            files_to_rename.append((old_name, file_path))
+            target_dirs.add(file_path.parent)
+    
+    if not files_to_rename:
+        print("No files to rename.")
+        return
+    
+    # First pass: identify which files already have the correct naming pattern
+    # and extract their indices
+    used_indices = set()  # Indices already used by files in correct format
+    files_needing_rename = []  # Files that need to be renamed
+    
+    for old_name, file_path in files_to_rename:
+        ext = file_path.suffix
+        current_name = file_path.name
+        
+        # Check if current filename matches the target pattern: prefix-XXX.ext
+        pattern = rf"^{re.escape(args.prefix)}(\d{{{args.pad_length}}}){re.escape(ext)}$"
+        match = re.match(pattern, current_name)
+        if match:
+            # File already has the correct format, record its index
+            idx = int(match.group(1))
+            used_indices.add(idx)
+        else:
+            # File needs to be renamed
+            files_needing_rename.append((old_name, file_path))
+    
+    # Second pass: assign new names to files that need renaming
     mapping = {}
     index = args.start_index
     
-    for old_name in image_links:
-        # Find the actual file
-        file_path = find_file_in_vault(old_name, md_path.parent, vault_root)
-        if not file_path:
-            print(f"Warning: Could not find file for link '{old_name}'")
-            continue
-            
+    for old_name, file_path in files_needing_rename:
         ext = file_path.suffix
+        
+        # Find the next available index that's not used by existing correctly-named files
+        while index in used_indices:
+            index += 1
+        
         new_name = f"{args.prefix}{date_str}-{str(index).zfill(args.pad_length)}{ext}"
         new_path = file_path.parent / new_name
         
         mapping[old_name] = (new_name, file_path, new_path)
+        used_indices.add(index)
         index += 1
 
     if not mapping:
